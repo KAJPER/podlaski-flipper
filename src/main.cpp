@@ -1,4 +1,105 @@
 #include "ble_spam.h"
+#include <U8g2lib.h>
+
+// Inicjalizacja wyświetlacza SH1106 (dostosuj piny I2C według swojej konfiguracji)
+U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
+
+#include "buttons.h"
+
+int currentMenuIndex = 0;
+const int menuItemsCount = 5; // Liczba elementów w menu
+
+void displayStatus(const String& text) {
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_6x10_tf);
+    
+    // Wycentruj tekst
+    int16_t width = u8g2.getStrWidth(text.c_str());
+    int16_t x = (128 - width) / 2;
+    
+    // Narysuj tekst na środku ekranu
+    u8g2.drawStr(x, 35, text.c_str());
+    
+    // Wyświetl zawartość bufora
+    u8g2.sendBuffer();
+}
+
+// Funkcja do wyświetlania menu
+void displayMenu() {
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_6x10_tf);
+    
+    const char* menuItems[] = {
+        "iOS Spam",
+        "SwiftPair",
+        "Samsung",
+        "Android",
+        "Spam All"
+    };
+    
+    // Wyświetl aktualny element menu
+    int16_t width = u8g2.getStrWidth(menuItems[currentMenuIndex]);
+    int16_t x = (128 - width) / 2;
+    u8g2.drawStr(x, 35, menuItems[currentMenuIndex]);
+    
+    // Dodaj strzałki nawigacyjne
+    if(currentMenuIndex > 0) {
+        u8g2.drawStr(5, 35, "<");
+    }
+    if(currentMenuIndex < menuItemsCount - 1) {
+        u8g2.drawStr(120, 35, ">");
+    }
+    
+    u8g2.sendBuffer();
+}
+
+void setup() {
+    u8g2.begin();
+    
+    // Konfiguracja pinów przycisków
+    pinMode(buttonLeftPin, INPUT_PULLUP);
+    pinMode(buttonRightPin, INPUT_PULLUP);
+    pinMode(buttonSelectPin, INPUT_PULLUP);
+    pinMode(buttonBackPin, INPUT_PULLUP);
+}
+
+void loop() {
+    bool menuActive = true;
+    displayMenu();
+    
+    while(menuActive) {
+        // Obsługa przycisku w lewo
+        if(digitalRead(buttonLeftPin) == LOW) {
+            if(currentMenuIndex > 0) {
+                currentMenuIndex--;
+                displayMenu();
+            }
+            delay(200); // Debounce
+        }
+        
+        // Obsługa przycisku w prawo
+        if(digitalRead(buttonRightPin) == LOW) {
+            if(currentMenuIndex < menuItemsCount - 1) {
+                currentMenuIndex++;
+                displayMenu();
+            }
+            delay(200); // Debounce
+        }
+        
+        // Obsługa przycisku zatwierdzania
+        if(digitalRead(buttonSelectPin) == LOW) {
+            // Uruchom wybraną funkcję
+            aj_adv(currentMenuIndex);
+            delay(200); // Debounce
+        }
+        
+        // Obsługa przycisku powrotu
+        if(digitalRead(buttonBackPin) == LOW) {
+            menuActive = false;
+            delay(200); // Debounce
+        }
+    }
+}
 
 // Bluetooth maximum transmit power
 #if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32S3)
@@ -437,53 +538,57 @@ void executeSpam(EBLEPayloadType type) {
   BLEDevice::deinit();
 }
 
-void aj_adv(int ble_choice){
-
-  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, MAX_TX_POWER);
-
-  int mael = 0;
-  int timer = 0;
-  int count = 0;
-  timer = millis();
-  while(1) {
-    if(millis()-timer >900) {
-
-      switch(ble_choice){
-        case 0: // Applejuice
-          displayRedStripe("iOS Spam (" + String(count) + ")",TFT_WHITE,bruceConfig.priColor);
-          executeSpam(Apple);
-          break;
-        case 1: // SwiftPair
-          displayRedStripe("SwiftPair  (" + String(count) + ")",TFT_WHITE,bruceConfig.priColor);
-          executeSpam(Microsoft);
-          break;
-        case 2: // Samsung
-          displayRedStripe("Samsung  (" + String(count) + ")",TFT_WHITE,bruceConfig.priColor);
-          executeSpam(Samsung);
-          break;
-        case 3: // Android
-          displayRedStripe("Android  (" + String(count) + ")",TFT_WHITE,bruceConfig.priColor);
-          executeSpam(Google);
-          break;
-        case 4: // Tutti-frutti
-          displayRedStripe("Spam All  (" + String(count) + ")",TFT_WHITE,bruceConfig.priColor);
-          if(mael == 0) executeSpam(Google);
-          if(mael == 1) executeSpam(Samsung);
-          if(mael == 2) executeSpam(Microsoft);
-          if(mael == 3) {
-            executeSpam(Apple);
-            mael = 0;
-          }
-          break;
-      }
-      count++;
-      timer = millis();
+void aj_adv(int ble_choice) {
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, MAX_TX_POWER);
+    
+    int mael = 0;
+    int timer = 0;
+    int count = 0;
+    timer = millis();
+    bool isRunning = true;
+    
+    while(isRunning) {
+        if(millis()-timer > 900) {
+            switch(ble_choice) {
+                case 0: // Applejuice
+                    displayStatus("iOS Spam (" + String(count) + ")");
+                    executeSpam(Apple);
+                    break;
+                case 1: // SwiftPair
+                    displayStatus("SwiftPair (" + String(count) + ")");
+                    executeSpam(Microsoft);
+                    break;
+                case 2: // Samsung
+                    displayStatus("Samsung (" + String(count) + ")");
+                    executeSpam(Samsung);
+                    break;
+                case 3: // Android
+                    displayStatus("Android (" + String(count) + ")");
+                    executeSpam(Google);
+                    break;
+                case 4: // Tutti-frutti
+                    displayStatus("Spam All (" + String(count) + ")");
+                    if(mael == 0) executeSpam(Google);
+                    if(mael == 1) executeSpam(Samsung);
+                    if(mael == 2) executeSpam(Microsoft);
+                    if(mael == 3) {
+                        executeSpam(Apple);
+                        mael = 0;
+                    }
+                    mael++;
+                    break;
+            }
+            count++;
+            timer = millis();
+        }
+        
+        // Sprawdź przycisk powrotu
+        if(digitalRead(buttonBackPin) == LOW) {
+            isRunning = false;
+            displayMenu(); // Powrót do menu
+            delay(200); // Debounce
+        }
     }
-
-    if(checkEscPress()) {
-      returnToMenu=true;
-      break;
-    }
-  }
-if(ble_choice>0) BLEDevice::deinit();
+    
+    if(ble_choice > 0) BLEDevice::deinit();
 }
