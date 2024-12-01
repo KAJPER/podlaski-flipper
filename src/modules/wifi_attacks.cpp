@@ -146,13 +146,28 @@ void startBeaconSpam(String baseSSID, int numNetworks) {
     }
 }
 
+// Definicje struktur dla pakietów WiFi
+typedef struct {
+    uint8_t frame_ctrl[2];
+    uint8_t duration[2];
+    uint8_t addr1[6];
+    uint8_t addr2[6];
+    uint8_t addr3[6];
+    uint8_t seq_ctrl[2];
+} wifi_ieee80211_mac_hdr_t;
+
+typedef struct {
+    wifi_ieee80211_mac_hdr_t hdr;
+    uint8_t payload[0];
+} wifi_ieee80211_packet_t;
+
 void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
     if(!attackRunning) return;
-    
-    const wifi_promiscuous_pkt_t *ppkt = (wifi_promiscuous_pkt_t *)buff;
-    const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)ppkt->payload;
-    const wifi_ieee80211_mac_hdr_t *hdr = &ipkt->hdr;
-    
+
+    const wifi_promiscuous_pkt_t* ppkt = (wifi_promiscuous_pkt_t*)buff;
+    const uint8_t* payload = ppkt->payload;
+    const wifi_ieee80211_mac_hdr_t* hdr = (wifi_ieee80211_mac_hdr_t*)payload;
+
     char addr1[18] = {0};
     char addr2[18] = {0};
     
@@ -163,6 +178,7 @@ void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
         hdr->addr2[0], hdr->addr2[1], hdr->addr2[2],
         hdr->addr2[3], hdr->addr2[4], hdr->addr2[5]);
     
+    // Wyświetlanie na ekranie
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_6x10_tf);
     u8g2.drawStr(0, 10, "Sniffing...");

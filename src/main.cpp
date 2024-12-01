@@ -1,119 +1,275 @@
 #include <Arduino.h>
-#include "modules/ble_spam.h"
 #include "modules/buttons.h"
 #include "modules/display.h"
+#include "modules/ble_spam.h"
+#include "modules/wifi_attacks.h"
 
 // Inicjalizacja wyświetlacza
 U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 
 // Zmienne menu
-int currentMenuIndex = 0; // Indeks aktualnego elementu menu
-int currentMenuLevel = 0; // 0: Główne menu, 1: Podmenu `ble_spam`
-const int mainMenuItemsCount = 1; // Liczba opcji w głównym menu
-const int bleSpamMenuItemsCount = 5; // Liczba opcji w menu `ble_spam`
+int currentMenuIndex = 0;
+int currentSubMenuIndex = 0;
+enum MenuType { MAIN_MENU, BLE_MENU, WIFI_MENU };
+MenuType currentMenu = MAIN_MENU;
 
-// Elementy głównego menu
+// Elementy menu głównego
 const char* mainMenuItems[] = {
-    "BLE Spam"
+    "BLE Spam",
+    "Deauth Attack",
+    "Beacon Spam",
+    "Packet Sniffer",
+    "Exit"
 };
+const int mainMenuItemsCount = 5;
 
-// Elementy podmenu `ble_spam`
-const char* bleSpamMenuItems[] = {
+// Elementy podmenu BLE
+const char* bleMenuItems[] = {
     "iOS Spam",
     "SwiftPair",
     "Samsung",
     "Android",
-    "Spam All"
+    "Spam All",
+    "Back"
 };
+const int bleMenuItemsCount = 6;
 
-// Wyświetlanie menu
 void displayMenu() {
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_6x10_tf);
-
-    if (currentMenuLevel == 0) {
-        // Główne menu
-        int16_t width = u8g2.getStrWidth(mainMenuItems[currentMenuIndex]);
-        int16_t x = (128 - width) / 2; // Wycentrowanie tekstu
-        u8g2.drawStr(x, 35, mainMenuItems[currentMenuIndex]);
-    } else if (currentMenuLevel == 1) {
-        // Podmenu `ble_spam`
-        int16_t width = u8g2.getStrWidth(bleSpamMenuItems[currentMenuIndex]);
-        int16_t x = (128 - width) / 2; // Wycentrowanie tekstu
-        u8g2.drawStr(x, 35, bleSpamMenuItems[currentMenuIndex]);
+    
+    const char* title;
+    const char** items;
+    int itemCount;
+    int currentIndex;
+    
+    switch(currentMenu) {
+        case MAIN_MENU:
+            title = "Main Menu";
+            items = mainMenuItems;
+            itemCount = mainMenuItemsCount;
+            currentIndex = currentMenuIndex;
+            break;
+        case BLE_MENU:
+            title = "BLE Spam";
+            items = bleMenuItems;
+            itemCount = bleMenuItemsCount;
+            currentIndex = currentSubMenuIndex;
+            break;
+        default:
+            return;
     }
-
-    // Strzałki nawigacyjne
-    if (currentMenuIndex > 0) {
-        u8g2.drawStr(5, 35, "<");
+    
+    // Tytuł
+    u8g2.drawStr(0, 10, title);
+    u8g2.drawHLine(0, 12, 128);
+    
+    // Elementy menu
+    int startY = 25;
+    int itemHeight = 12;
+    int maxItems = 4;
+    
+    int startItem = max(0, currentIndex - maxItems + 1);
+    startItem = min(startItem, max(0, itemCount - maxItems));
+    
+    for(int i = 0; i < min(maxItems, itemCount); i++) {
+        int itemIndex = startItem + i;
+        if(itemIndex == currentIndex) {
+            u8g2.drawBox(0, startY + i*itemHeight - 9, 128, 11);
+            u8g2.setDrawColor(0);
+        }
+        u8g2.drawStr(2, startY + i*itemHeight, items[itemIndex]);
+        u8g2.setDrawColor(1);
     }
-    if ((currentMenuLevel == 0 && currentMenuIndex < mainMenuItemsCount - 1) ||
-        (currentMenuLevel == 1 && currentMenuIndex < bleSpamMenuItemsCount - 1)) {
-        u8g2.drawStr(120, 35, ">");
-    }
-
+    
     u8g2.sendBuffer();
 }
 
-// Obsługa wyboru w menu
 void handleMenuSelection() {
-    if (currentMenuLevel == 0) {
-        // Główne menu
-        if (currentMenuIndex == 0) {
-            // Wejście do podmenu `ble_spam`
-            currentMenuLevel = 1;
-            currentMenuIndex = 0;
+    if(currentMenu == MAIN_MENU) {
+        switch(currentMenuIndex) {
+            case 0: // BLE Spam
+                currentMenu = BLE_MENU;
+                currentSubMenuIndex = 0;
+                break;
+                
+            case 1: // Deauth Attack
+                {
+                    auto networks = scanNetworks();
+                    int selectedNetwork = 0;
+                    bool selecting = true;
+                    
+                    while(selecting) {
+                        u8g2.clearBuffer();
+                        u8g2.setFont(u8g2_font_6x10_tf);
+                        
+                        for(int i = 0; i < min(4, (int)networks.size()); i++) {
+                            if(i == selectedNetwork) {
+                                u8g2.drawBox(0, i*16, 128, 15);
+                                u8g2.setDrawColor(0);
+                            }
+                            u8g2.drawStr(2, (i+1)*16-4, networks[i].ssid.c_str());
+                            u8g2.setDrawColor(1);
+                        }
+                        u8g2.sendBuffer();
+                        
+                        if(digitalRead(buttonLeftPin) == LOW && selectedNetwork > 0) {
+                            selectedNetwork--;
+                            delay(200);
+                        }
+                        if(digitalRead(buttonRightPin) == LOW && selectedNetwork < networks.size()-1) {
+                            selectedNetwork++;
+                            delay(200);
+                        }
+                        if(digitalRead(buttonSelectPin) == LOW) {
+                            startDeauthAttack(networks[selectedNetwork]);
+                            selecting = false;
+                            delay(200);
+                        }
+                        if(digitalRead(buttonBackPin) == LOW) {
+                            selecting = false;
+                            delay(200);
+                        }
+                    }
+                }
+                break;
+                
+            case 2: // Beacon Spam
+                {
+                    int numNetworks = 10;
+                    bool configuring = true;
+                    
+                    while(configuring) {
+                        u8g2.clearBuffer();
+                        u8g2.setFont(u8g2_font_6x10_tf);
+                        u8g2.drawStr(2, 12, ("Networks: " + String(numNetworks)).c_str());
+                        u8g2.sendBuffer();
+                        
+                        if(digitalRead(buttonLeftPin) == LOW && numNetworks > 1) {
+                            numNetworks--;
+                            delay(200);
+                        }
+                        if(digitalRead(buttonRightPin) == LOW && numNetworks < 100) {
+                            numNetworks++;
+                            delay(200);
+                        }
+                        if(digitalRead(buttonSelectPin) == LOW) {
+                            startBeaconSpam("KINDZIUK", numNetworks);
+                            configuring = false;
+                            delay(200);
+                        }
+                        if(digitalRead(buttonBackPin) == LOW) {
+                            configuring = false;
+                            delay(200);
+                        }
+                    }
+                }
+                break;
+                
+            case 3: // Packet Sniffer
+                {
+                    auto networks = scanNetworks();
+                    int selectedNetwork = 0;
+                    bool selecting = true;
+                    
+                    while(selecting) {
+                        u8g2.clearBuffer();
+                        u8g2.setFont(u8g2_font_6x10_tf);
+                        
+                        for(int i = 0; i < min(4, (int)networks.size()); i++) {
+                            if(i == selectedNetwork) {
+                                u8g2.drawBox(0, i*16, 128, 15);
+                                u8g2.setDrawColor(0);
+                            }
+                            u8g2.drawStr(2, (i+1)*16-4, networks[i].ssid.c_str());
+                            u8g2.setDrawColor(1);
+                        }
+                        u8g2.sendBuffer();
+                        
+                        if(digitalRead(buttonLeftPin) == LOW && selectedNetwork > 0) {
+                            selectedNetwork--;
+                            delay(200);
+                        }
+                        if(digitalRead(buttonRightPin) == LOW && selectedNetwork < networks.size()-1) {
+                            selectedNetwork++;
+                            delay(200);
+                        }
+                        if(digitalRead(buttonSelectPin) == LOW) {
+                            startPacketSniffing(networks[selectedNetwork]);
+                            selecting = false;
+                            delay(200);
+                        }
+                        if(digitalRead(buttonBackPin) == LOW) {
+                            selecting = false;
+                            delay(200);
+                        }
+                    }
+                }
+                break;
+                
+            case 4: // Exit
+                ESP.restart();
+                break;
         }
-    } else if (currentMenuLevel == 1) {
-        // Podmenu `ble_spam`
-        aj_adv(currentMenuIndex); // Wywołanie funkcji BLE
+    } else if(currentMenu == BLE_MENU) {
+        if(currentSubMenuIndex == bleMenuItemsCount - 1) { // Back
+            currentMenu = MAIN_MENU;
+            currentMenuIndex = 0;
+        } else {
+            aj_adv(currentSubMenuIndex);
+        }
     }
 }
 
-// Konfiguracja początkowa
 void setup() {
     // Inicjalizacja wyświetlacza
     u8g2.begin();
-
-    // Konfiguracja pinów przycisków
+    
+    // Inicjalizacja przycisków
     pinMode(buttonLeftPin, INPUT_PULLUP);
     pinMode(buttonRightPin, INPUT_PULLUP);
     pinMode(buttonSelectPin, INPUT_PULLUP);
     pinMode(buttonBackPin, INPUT_PULLUP);
-
-    // Wyświetlenie menu początkowego
+    
+    // Inicjalizacja WiFi
+    initWiFiAttacks();
+    
     displayMenu();
 }
 
 void loop() {
-    // Nawigacja w menu
-    if (digitalRead(buttonLeftPin) == LOW) {
-        if (currentMenuIndex > 0) {
+    if(digitalRead(buttonLeftPin) == LOW) {
+        if(currentMenu == MAIN_MENU && currentMenuIndex > 0) {
             currentMenuIndex--;
-            displayMenu();
+        } else if(currentMenu == BLE_MENU && currentSubMenuIndex > 0) {
+            currentSubMenuIndex--;
         }
-        delay(200); // Debounce
+        displayMenu();
+        delay(200);
     }
-    if (digitalRead(buttonRightPin) == LOW) {
-        if ((currentMenuLevel == 0 && currentMenuIndex < mainMenuItemsCount - 1) ||
-            (currentMenuLevel == 1 && currentMenuIndex < bleSpamMenuItemsCount - 1)) {
+    
+    if(digitalRead(buttonRightPin) == LOW) {
+        if(currentMenu == MAIN_MENU && currentMenuIndex < mainMenuItemsCount - 1) {
             currentMenuIndex++;
-            displayMenu();
+        } else if(currentMenu == BLE_MENU && currentSubMenuIndex < bleMenuItemsCount - 1) {
+            currentSubMenuIndex++;
         }
-        delay(200); // Debounce
+        displayMenu();
+        delay(200);
     }
-    if (digitalRead(buttonSelectPin) == LOW) {
+    
+    if(digitalRead(buttonSelectPin) == LOW) {
         handleMenuSelection();
-        displayMenu(); // Aktualizacja menu po wyborze
-        delay(200); // Debounce
+        displayMenu();
+        delay(200);
     }
-    if (digitalRead(buttonBackPin) == LOW) {
-        if (currentMenuLevel > 0) {
-            // Powrót do poprzedniego poziomu menu
-            currentMenuLevel--;
+    
+    if(digitalRead(buttonBackPin) == LOW) {
+        if(currentMenu != MAIN_MENU) {
+            currentMenu = MAIN_MENU;
             currentMenuIndex = 0;
             displayMenu();
         }
-        delay(200); // Debounce
+        delay(200);
     }
 }
